@@ -1,0 +1,7 @@
+# Referencia «techo»: un único cliente con todos los datos (cada ronda = E épocas)
+# (no hay comunicación real: ignorad las columnas de bytes)
+partition:
+  type: iid
+  n_clients: 1
+server:
+  fraction: 1.0

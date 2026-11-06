@@ -1,0 +1,181 @@
+# AAGE · Práctica 2 (Parte I): aprendizaje federado desde cero
+
+Vais a implementar en PyTorch, sin frameworks de FL, el bucle completo de aprendizaje federado
+sobre Fashion-MNIST: reparto de los datos entre 10 clientes (IID y no-IID), entrenamiento local,
+agregación con FedAvg y FedProx, y medida del coste de comunicación.
+
+El código ya resuelve la parte «aburrida» (carga de datos, configuración, registro de resultados
+y gráficas). Vosotros escribís todo lo que es aprendizaje federado: modelos, reparto de datos,
+entrenamiento local, agregación, la ronda federada y la medida de la comunicación.
+
+## Instalación
+
+Python 3.11 o 3.12 (sirve desde 3.10). Basta con la CPU. Los paquetes necesarios son `torch`,
+`torchvision` (descarga Fashion-MNIST), `matplotlib`, `pyyaml` y `pytest`; están en `requirements.txt`.
+En Linux sin GPU conviene instalar antes la versión de torch para CPU, que ocupa mucho menos:
+`pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`.
+
+```bash
+# Opción A: conda (el entorno con conda, los paquetes con pip)
+conda create -n aage python=3.11
+conda activate aage
+pip install -r requirements.txt
+
+# Opción B: venv
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+En **Google Colab**: subid la carpeta (o clonad el repo), `%cd` a ella y ejecutad
+`!pip install pyyaml` (el resto ya viene instalado). Luego `!python run.py`.
+
+Fashion-MNIST se descarga sola en `data/` la primera vez (~30 MB).
+
+## Ejecutar un experimento
+
+```bash
+python run.py                                         # configuración por defecto
+python run.py --config configs/examples/iid.yaml      # un ejemplo
+python run.py --set partition.alpha=1.0 client.local_epochs=5 server.fraction=1.0
+```
+
+Toda ejecución parte de [configs/default.yaml](configs/default.yaml), donde están comentadas
+todas las opciones. `--config` y `--set` solo indican lo que cambia, así que es fácil hacer barridos:
+
+```bash
+for a in 0.1 1.0 10; do python run.py --set partition.alpha=$a; done
+python plot.py runs/* -o runs/alpha.png
+```
+
+Referencias con las que comparar:
+
+| Referencia | Comando |
+|---|---|
+| Centralizado (techo): un único cliente con todos los datos | `python run.py --config configs/examples/centralized.yaml` |
+| Solo local (suelo): cada cliente entrena por su cuenta | `python run.py --config configs/examples/local_only.yaml` |
+
+## Resultados
+
+Cada ejecución crea `runs/<nombre>/` (nombre automático a partir de la configuración, o
+`--set output.name=...`). Si la carpeta ya existe, se sobrescribe.
+
+- `config.json`: configuración completa.
+- `metrics.csv`: una fila por ronda: `round, test_acc, test_loss, train_loss, bytes_up, bytes_down, bytes_cum, time_s`.
+  El modelo global se evalúa siempre sobre el test completo de Fashion-MNIST.
+- `partition.png`: cuántos ejemplos de cada clase tiene cada cliente.
+
+`python plot.py runs/a runs/b ...` dibuja accuracy y pérdida por ronda y accuracy frente a MB
+transmitidos. Ampliadlo con lo que necesitéis.
+
+## Estructura y qué tenéis que completar
+
+```
+run.py              punto de entrada: lee la config y monta el experimento
+plot.py             gráficas a partir de los metrics.csv
+configs/            default.yaml + ejemplos
+fl/
+├── data.py         carga de datos y particionado
+├── models.py       vuestros MLP y CNN, evaluate(), count_params()
+├── server.py       Server: la ronda federada; LocalOnly: referencia sin comunicación
+├── clients/        cómo entrena un cliente: un archivo por tipo
+│   ├── base.py         Client (FedAvg)
+│   └── fedprox.py      FedProxClient
+├── aggregators/    cómo combina el servidor: un archivo por método
+│   ├── base.py         Aggregator (interfaz)
+│   └── fedavg.py       FedAvg
+├── codecs/         qué viaja por la red
+│   └── base.py         Codec (interfaz; por defecto, sin compresión) y state_dict_nbytes
+└── utils.py        configuración, semillas y registro (no hace falta tocarlo)
+tests/public/       tests para comprobar vuestro código (uno por módulo)
+```
+
+Los huecos lanzan `NotImplementedError("TODO: ...")` y su docstring explica qué deben hacer.
+En este orden:
+
+| # | Archivo | Qué |
+|---|---|---|
+| 1 | `fl/data.py` | `iid`, `dirichlet`, `dirichlet_shards` |
+| 2 | `fl/models.py` | `MLP` (el de las diapositivas) y `CNN` (diseño libre, ≤ 100 000 parámetros) |
+| 3 | `fl/codecs/base.py` | `state_dict_nbytes` |
+| 4 | `fl/server.py` | `sample_clients` y `Server.run_round` |
+| 5 | `fl/aggregators/fedavg.py` | `FedAvg.aggregate` |
+| 6 | `fl/clients/base.py` | `Client.local_train` |
+| 7 | `fl/clients/fedprox.py` | `FedProxClient.loss` |
+| 8 | `fl/server.py` | `LocalOnly.run_round` |
+
+Con los seis primeros ya funciona `python run.py`.
+
+### Métodos nuevos
+
+Otras piezas, como la **cuantización de la subida**, no tienen hueco: decidís vosotros dónde y cómo
+implementarlas. La convención es la misma para todo:
+
+- Cada método es una clase en su propio archivo, dentro de la carpeta que le toca, y hereda de la
+  interfaz de esa carpeta (`Client`, `Aggregator` o `Codec`).
+- Se registra con un nombre en el `__init__.py` de la carpeta (`build_clients`, `build_aggregator`
+  o `build_codec`) para poder elegirlo desde la configuración, p. ej. `--set server.codec=int8`.
+- Si necesita parámetros, añadidlos a `configs/default.yaml`.
+
+La cuantización debe poder usarse con `server.codec: int8`: hay un test público que lo comprueba.
+
+**No cambiéis las firmas de las funciones con hueco** ni el formato de `metrics.csv`: los tests y
+la corrección dependen de ellos.
+
+## Tests
+
+```bash
+pytest                      # todos
+pytest tests/public/test_data.py -v
+```
+
+Pasar los tests públicos no garantiza que todo esté bien: en la corrección hay tests adicionales.
+
+## De Keras a PyTorch
+
+<details>
+<summary>Guía rápida (pulsa para desplegar)</summary>
+
+Las ideas son las mismas; lo que cambia es que en PyTorch el bucle de entrenamiento se escribe a mano
+(y por eso podemos meter en él el término de FedProx).
+
+| Keras | PyTorch |
+|---|---|
+| `keras.Sequential([...])` | `nn.Sequential(...)` |
+| `layers.Dense(200, activation="relu")` | `nn.Linear(n_entrada, 200), nn.ReLU()` |
+| `layers.Conv2D(16, 3, padding="same")` | `nn.Conv2d(canales_entrada, 16, 3, padding=1)` |
+| `layers.MaxPooling2D(2)` / `layers.Flatten()` | `nn.MaxPool2d(2)` / `nn.Flatten()` |
+| `loss="sparse_categorical_crossentropy"` + softmax final | `F.cross_entropy(logits, y)` (sin softmax: recibe logits) |
+| `optimizer=SGD(learning_rate=0.01)` | `torch.optim.SGD(model.parameters(), lr=0.01)` |
+| `model.fit(x, y, batch_size=32, epochs=E)` | el bucle de abajo |
+| `model.evaluate(x, y)` | `evaluate(model, dataset)` (en `fl/models.py`) |
+| `model.get_weights()` / `set_weights(w)` | `model.state_dict()` / `model.load_state_dict(sd)` |
+| `clone_model(m)` + `set_weights(...)` | `copy.deepcopy(model)` |
+| `model.count_params()` | `count_params(model)` (en `fl/models.py`) |
+| `tf.Tensor`, `.numpy()` | `torch.Tensor`, `.item()` para un escalar |
+
+Equivalente a `model.fit` (las imágenes ya vienen como `(canales, alto, ancho)`):
+
+```python
+loader = DataLoader(dataset, batch_size=32, shuffle=True)   # mini-lotes barajados
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+model.train()                                               # modo entrenamiento
+for epoch in range(E):
+    for x, y in loader:
+        optimizer.zero_grad()                # borra los gradientes del paso anterior
+        loss = F.cross_entropy(model(x), y)  # pasada hacia delante
+        loss.backward()                      # calcula los gradientes
+        optimizer.step()                     # actualiza los pesos
+```
+
+Más cosas útiles: `model.parameters()` recorre los tensores entrenables;
+`tensor.detach().clone()` hace una copia que no participa en el cálculo de gradientes;
+`(a - b) ** 2` y `.sum()` funcionan como en NumPy.
+
+</details>
+
+## Tiempos de referencia
+
+Configuración por defecto (30 rondas, 5 de 10 clientes por ronda, 1 época local), solo CPU
+(sobremesa de 16 hilos): **MLP ≈ 20 s**, **CNN de referencia ≈ 75 s**. En un portátil contad
+con 2-4 veces más. Si tenéis GPU, `device: auto` la usa.

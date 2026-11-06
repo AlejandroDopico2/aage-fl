@@ -1,0 +1,3 @@
+# FedProx: FedAvg + término proximal en el cliente
+client:
+  fedprox_mu: 0.01

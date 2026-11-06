@@ -1,0 +1,4 @@
+# Cada cliente solo ve 2 clases (proporciones Dirichlet entre ellas)
+partition:
+  type: shards
+  classes_per_client: 2

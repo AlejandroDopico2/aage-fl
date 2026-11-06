@@ -1,0 +1,35 @@
+# Configuración base. Todas las ejecuciones parten de aquí: los ficheros de
+# configs/examples/ y los --set de la línea de comandos solo indican lo que cambia.
+seed: 42
+device: auto              # auto | cpu | cuda
+mode: federated           # federated | local_only (referencia «suelo»: sin comunicación)
+
+data:
+  dataset: fmnist
+  root: ./data
+
+partition:
+  type: dirichlet         # iid | dirichlet | shards
+  n_clients: 10
+  alpha: 0.1              # concentración de Dirichlet (dirichlet y shards)
+  classes_per_client: 2   # solo shards
+
+model:
+  name: mlp               # mlp | cnn
+  hidden: 200             # solo mlp
+
+client:                   # lo que hace cada cliente en su entrenamiento local
+  local_epochs: 1
+  batch_size: 32
+  lr: 0.01
+  fedprox_mu: 0.0         # > 0 activa FedProx
+
+server:                   # lo que decide el servidor en cada ronda
+  rounds: 30
+  fraction: 0.5           # fracción de clientes que participa en cada ronda (C)
+  aggregator: fedavg      # nombre registrado en build_aggregator
+  codec: none             # nombre registrado en build_codec: none (sin compresión) | int8
+
+output:
+  dir: runs
+  name: null              # null: nombre automático a partir de la configuración

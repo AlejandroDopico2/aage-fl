@@ -1,0 +1,120 @@
+"""Datos: carga de Fashion-MNIST y reparto entre clientes.
+
+Un *particionado* (``Partition``) es una lista con un array de índices por cliente:
+``partition[i]`` son las posiciones del conjunto de entrenamiento que tiene el cliente ``i``.
+Todo particionado debe repartir cada índice a exactamente un cliente (sin huecos ni solapes).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from matplotlib.figure import Figure
+from torch.utils.data import TensorDataset
+from torchvision import datasets
+
+from fl.utils import Config
+
+Partition = list[np.ndarray]
+
+FMNIST_MEAN, FMNIST_STD = 0.2860, 0.3530
+
+
+# ---------------------------------------------------------------------------
+# Carga (DADO)
+# ---------------------------------------------------------------------------
+def load_dataset(name: str, root: str) -> tuple[TensorDataset, TensorDataset]:
+    """Descarga (la primera vez) el dataset y lo carga entero en memoria.
+
+    Devuelve ``(train, test)``. Cada ejemplo es un par ``(x, y)``: ``x`` es una imagen
+    normalizada de forma ``(1, 28, 28)`` e ``y`` su clase (0-9).
+    Las etiquetas de todo el conjunto están en ``train.tensors[1]``.
+    """
+    if name != "fmnist":
+        raise ValueError(f"Dataset desconocido: {name!r}")
+    splits = (datasets.FashionMNIST(root, train=train, download=True) for train in (True, False))
+    return tuple(_to_tensors(split) for split in splits)
+
+
+def _to_tensors(split: datasets.FashionMNIST) -> TensorDataset:
+    x = split.data.unsqueeze(1).float().div(255).sub(FMNIST_MEAN).div(FMNIST_STD)
+    return TensorDataset(x, split.targets.long())
+
+
+# ---------------------------------------------------------------------------
+# Particionado
+# ---------------------------------------------------------------------------
+def make_partition(labels: np.ndarray, cfg: Config, seed: int) -> Partition:
+    """Elige la estrategia de reparto según ``cfg.type`` (sección ``partition`` de la config)."""
+    if cfg.type == "iid":
+        return iid(labels, cfg.n_clients, seed)
+    if cfg.type == "dirichlet":
+        return dirichlet(labels, cfg.n_clients, cfg.alpha, seed)
+    if cfg.type == "shards":
+        return dirichlet_shards(labels, cfg.n_clients, cfg.classes_per_client, cfg.alpha, seed)
+    raise ValueError(f"Particionado desconocido: {cfg.type!r}")
+
+
+def split_by_proportions(indices: np.ndarray, proportions: np.ndarray) -> list[np.ndarray]:
+    """(DADO) Divide ``indices`` en ``len(proportions)`` trozos consecutivos de tamaño ≈ proporcional.
+
+    >>> split_by_proportions(np.arange(10), np.array([0.5, 0.3, 0.2]))
+    [array([0, 1, 2, 3, 4]), array([5, 6, 7]), array([8, 9])]
+    """
+    proportions = np.asarray(proportions, dtype=float) / np.sum(proportions)
+    cuts = np.round(np.cumsum(proportions)[:-1] * len(indices)).astype(int)
+    return np.split(indices, cuts)
+
+
+def iid(labels: np.ndarray, n_clients: int, seed: int) -> Partition:
+    """Reparto IID: cada cliente recibe una muestra aleatoria del mismo tamaño (±1).
+
+    Args:
+        labels: etiqueta de cada ejemplo de entrenamiento, forma ``(N,)``.
+        n_clients: número de clientes.
+        seed: semilla; la misma semilla debe dar el mismo reparto.
+    """
+    # TODO: baraja los índices 0..N-1 con un generador propio (np.random.default_rng(seed))
+    #       y divídelos en n_clients trozos.
+    raise NotImplementedError("TODO: reparto IID")
+
+
+def dirichlet(labels: np.ndarray, n_clients: int, alpha: float, seed: int, min_size: int = 10) -> Partition:
+    """Reparto no-IID por Dirichlet (Hsu et al., 2019).
+
+    Para cada clase se muestrean unas proporciones ``p ~ Dir(alpha, ..., alpha)`` (una por cliente)
+    y los ejemplos de esa clase se reparten según ``p``. Con ``alpha`` pequeño cada cliente se queda
+    con pocas clases; con ``alpha`` grande el reparto se parece al IID.
+    Si algún cliente queda con menos de ``min_size`` ejemplos, se repite el muestreo.
+    """
+    # TODO: para cada clase, baraja sus índices, muestrea las proporciones con rng.dirichlet
+    #       y repártelos con split_by_proportions. Comprueba min_size al final.
+    raise NotImplementedError("TODO: reparto Dirichlet(alpha)")
+
+
+def dirichlet_shards(labels: np.ndarray, n_clients: int, classes_per_client: int, alpha: float, seed: int) -> Partition:
+    """Reparto por clases: cada cliente tiene solo ``classes_per_client`` clases (k).
+
+    1. Se asignan k clases distintas a cada cliente, de modo que todas las clases tengan dueño
+       (hace falta ``n_clients * k >= n_clases``).
+    2. Dentro de cada cliente, el peso de cada una de sus k clases sigue ``Dir(alpha)``.
+    3. Los ejemplos de cada clase se reparten entre sus dueños en proporción a esos pesos.
+    """
+    # TODO: decide qué clases tiene cada cliente, muestrea sus pesos con rng.dirichlet y reparte
+    #       cada clase entre sus dueños (split_by_proportions). Ningún ejemplo debe quedar fuera.
+    raise NotImplementedError("TODO: reparto por clases (shards) con pesos Dirichlet")
+
+
+def plot_partition(labels: np.ndarray, partition: Partition, path) -> None:
+    """(DADO) Guarda un histograma apilado con el nº de ejemplos de cada clase por cliente."""
+    n_classes = int(labels.max()) + 1
+    counts = np.array([np.bincount(labels[idx], minlength=n_classes) for idx in partition])
+    fig = Figure(figsize=(max(6, 0.5 * len(partition)), 4))
+    ax = fig.subplots()
+    bottom = np.zeros(len(partition))
+    for c in range(n_classes):
+        ax.bar(range(len(partition)), counts[:, c], bottom=bottom, label=str(c), color=f"C{c}")
+        bottom += counts[:, c]
+    ax.set(xlabel="cliente", ylabel="nº de ejemplos", xticks=range(len(partition)))
+    ax.legend(title="clase", bbox_to_anchor=(1.01, 1), loc="upper left", fontsize="small")
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
