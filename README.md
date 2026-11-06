@@ -1,18 +1,19 @@
 # AAGE · Práctica 2 (Parte I): aprendizaje federado desde cero
 
-Vais a implementar en PyTorch, sin frameworks de FL, el bucle completo de aprendizaje federado
-sobre Fashion-MNIST: reparto de los datos entre 10 clientes (IID y no-IID), entrenamiento local,
+Implementación en PyTorch, sin frameworks de FL, del bucle completo de aprendizaje federado sobre
+Fashion-MNIST: reparto de los datos entre 10 clientes (IID y no-IID), entrenamiento local,
 agregación con FedAvg y FedProx, y medida del coste de comunicación.
 
-El código ya resuelve la parte «aburrida» (carga de datos, configuración, registro de resultados
-y gráficas). Vosotros escribís todo lo que es aprendizaje federado: modelos, reparto de datos,
-entrenamiento local, agregación, la ronda federada y la medida de la comunicación.
+El código base incluye la carga de datos, la configuración, el registro de resultados y las
+gráficas. Las partes propias del aprendizaje federado (modelos, reparto de datos, entrenamiento
+local, agregación, la ronda federada y la medida de la comunicación) quedan por implementar.
 
 ## Instalación
 
-Python 3.11 o 3.12 (sirve desde 3.10). Basta con la CPU. Los paquetes necesarios son `torch`,
-`torchvision` (descarga Fashion-MNIST), `matplotlib`, `pyyaml` y `pytest`; están en `requirements.txt`.
-En Linux sin GPU conviene instalar antes la versión de torch para CPU, que ocupa mucho menos:
+Requiere Python 3.10 o superior; basta con la CPU. Los paquetes necesarios son `torch`,
+`torchvision` (descarga Fashion-MNIST), `matplotlib`, `pyyaml` y `pytest`, y están en
+`requirements.txt`. En Linux sin GPU se recomienda instalar antes la versión de torch para CPU,
+que ocupa mucho menos:
 `pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu`.
 
 ```bash
@@ -27,10 +28,10 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-En **Google Colab**: subid la carpeta (o clonad el repo), `%cd` a ella y ejecutad
-`!pip install pyyaml` (el resto ya viene instalado). Luego `!python run.py`.
+En **Google Colab**: subir la carpeta, situarse en ella con `%cd` y ejecutar `!pip install pyyaml`
+(el resto ya viene instalado). Después, `!python run.py`.
 
-Fashion-MNIST se descarga sola en `data/` la primera vez (~30 MB).
+Fashion-MNIST se descarga automáticamente en `data/` la primera vez (~30 MB).
 
 ## Ejecutar un experimento
 
@@ -41,14 +42,14 @@ python run.py --set partition.alpha=1.0 client.local_epochs=5 server.fraction=1.
 ```
 
 Toda ejecución parte de [configs/default.yaml](configs/default.yaml), donde están comentadas
-todas las opciones. `--config` y `--set` solo indican lo que cambia, así que es fácil hacer barridos:
+todas las opciones. `--config` y `--set` solo indican lo que cambia, lo que facilita los barridos:
 
 ```bash
 for a in 0.1 1.0 10; do python run.py --set partition.alpha=$a; done
 python plot.py runs/* -o runs/alpha.png
 ```
 
-Referencias con las que comparar:
+Referencias de comparación:
 
 | Referencia | Comando |
 |---|---|
@@ -63,12 +64,12 @@ Cada ejecución crea `runs/<nombre>/` (nombre automático a partir de la configu
 - `config.json`: configuración completa.
 - `metrics.csv`: una fila por ronda: `round, test_acc, test_loss, train_loss, bytes_up, bytes_down, bytes_cum, time_s`.
   El modelo global se evalúa siempre sobre el test completo de Fashion-MNIST.
-- `partition.png`: cuántos ejemplos de cada clase tiene cada cliente.
+- `partition.png`: número de ejemplos de cada clase en cada cliente.
 
-`python plot.py runs/a runs/b ...` dibuja accuracy y pérdida por ronda y accuracy frente a MB
-transmitidos. Ampliadlo con lo que necesitéis.
+`python plot.py runs/a runs/b ...` dibuja la accuracy y la pérdida por ronda y la accuracy frente a
+los MB transmitidos.
 
-## Estructura y qué tenéis que completar
+## Estructura
 
 ```
 run.py              punto de entrada: lee la config y monta el experimento
@@ -76,27 +77,29 @@ plot.py             gráficas a partir de los metrics.csv
 configs/            default.yaml + ejemplos
 fl/
 ├── data.py         carga de datos y particionado
-├── models.py       vuestros MLP y CNN, evaluate(), count_params()
+├── models.py       MLP, CNN, evaluate(), count_params()
 ├── server.py       Server: la ronda federada; LocalOnly: referencia sin comunicación
-├── clients/        cómo entrena un cliente: un archivo por tipo
+├── clients/        entrenamiento local: un archivo por tipo de cliente
 │   ├── base.py         Client (FedAvg)
 │   └── fedprox.py      FedProxClient
-├── aggregators/    cómo combina el servidor: un archivo por método
+├── aggregators/    agregación en el servidor: un archivo por método
 │   ├── base.py         Aggregator (interfaz)
 │   └── fedavg.py       FedAvg
-├── codecs/         qué viaja por la red
+├── codecs/         codificación de lo que viaja por la red
 │   └── base.py         Codec (interfaz; por defecto, sin compresión) y state_dict_nbytes
-└── utils.py        configuración, semillas y registro (no hace falta tocarlo)
-tests/public/       tests para comprobar vuestro código (uno por módulo)
+└── utils.py        configuración, semillas y registro
+tests/public/       tests públicos (uno por hueco)
 ```
 
-Los huecos lanzan `NotImplementedError("TODO: ...")` y su docstring explica qué deben hacer.
-En este orden:
+### Huecos
+
+Los huecos lanzan `NotImplementedError("TODO: ...")` y su docstring describe el comportamiento
+esperado. Orden recomendado:
 
 | # | Archivo | Qué |
 |---|---|---|
 | 1 | `fl/data.py` | `iid`, `dirichlet`, `dirichlet_shards` |
-| 2 | `fl/models.py` | `MLP` (el de las diapositivas) y `CNN` (diseño libre, ≤ 100 000 parámetros) |
+| 2 | `fl/models.py` | `MLP` y `CNN` (diseño libre, ≤ 100 000 parámetros) |
 | 3 | `fl/codecs/base.py` | `state_dict_nbytes` |
 | 4 | `fl/server.py` | `sample_clients` y `Server.run_round` |
 | 5 | `fl/aggregators/fedavg.py` | `FedAvg.aggregate` |
@@ -104,23 +107,23 @@ En este orden:
 | 7 | `fl/clients/fedprox.py` | `FedProxClient.loss` |
 | 8 | `fl/server.py` | `LocalOnly.run_round` |
 
-Con los seis primeros ya funciona `python run.py`.
+Con los seis primeros, `python run.py` ya ejecuta un experimento completo.
 
 ### Métodos nuevos
 
-Otras piezas, como la **cuantización de la subida**, no tienen hueco: decidís vosotros dónde y cómo
-implementarlas. La convención es la misma para todo:
+Los métodos que no tienen hueco, como la **cuantización de la subida**, siguen la misma
+convención:
 
-- Cada método es una clase en su propio archivo, dentro de la carpeta que le toca, y hereda de la
-  interfaz de esa carpeta (`Client`, `Aggregator` o `Codec`).
+- Cada método es una clase en su propio archivo, dentro de la carpeta correspondiente, y hereda de
+  la interfaz de esa carpeta (`Client`, `Aggregator` o `Codec`).
 - Se registra con un nombre en el `__init__.py` de la carpeta (`build_clients`, `build_aggregator`
   o `build_codec`) para poder elegirlo desde la configuración, p. ej. `--set server.codec=int8`.
-- Si necesita parámetros, añadidlos a `configs/default.yaml`.
+- Sus parámetros, si los tiene, se añaden a `configs/default.yaml`.
 
-La cuantización debe poder usarse con `server.codec: int8`: hay un test público que lo comprueba.
+La cuantización debe estar disponible como `server.codec: int8`; un test público lo comprueba.
 
-**No cambiéis las firmas de las funciones con hueco** ni el formato de `metrics.csv`: los tests y
-la corrección dependen de ellos.
+**No se deben cambiar las firmas de las funciones con hueco** ni el formato de `metrics.csv`: los
+tests y la corrección dependen de ellos.
 
 ## Tests
 
@@ -129,15 +132,15 @@ pytest                      # todos
 pytest tests/public/test_data.py -v
 ```
 
-Pasar los tests públicos no garantiza que todo esté bien: en la corrección hay tests adicionales.
+Los tests públicos no cubren todos los casos; la corrección incluye tests adicionales.
 
 ## De Keras a PyTorch
 
 <details>
-<summary>Guía rápida (pulsa para desplegar)</summary>
+<summary>Guía rápida (pulsar para desplegar)</summary>
 
-Las ideas son las mismas; lo que cambia es que en PyTorch el bucle de entrenamiento se escribe a mano
-(y por eso podemos meter en él el término de FedProx).
+Las ideas son las mismas; la diferencia principal es que en PyTorch el bucle de entrenamiento se
+escribe explícitamente (lo que permite, por ejemplo, añadir el término de FedProx).
 
 | Keras | PyTorch |
 |---|---|
@@ -168,7 +171,7 @@ for epoch in range(E):
         optimizer.step()                     # actualiza los pesos
 ```
 
-Más cosas útiles: `model.parameters()` recorre los tensores entrenables;
+Otras operaciones útiles: `model.parameters()` recorre los tensores entrenables;
 `tensor.detach().clone()` hace una copia que no participa en el cálculo de gradientes;
 `(a - b) ** 2` y `.sum()` funcionan como en NumPy.
 
@@ -177,5 +180,5 @@ Más cosas útiles: `model.parameters()` recorre los tensores entrenables;
 ## Tiempos de referencia
 
 Configuración por defecto (30 rondas, 5 de 10 clientes por ronda, 1 época local), solo CPU
-(sobremesa de 16 hilos): **MLP ≈ 20 s**, **CNN de referencia ≈ 75 s**. En un portátil contad
-con 2-4 veces más. Si tenéis GPU, `device: auto` la usa.
+(sobremesa de 16 hilos): **MLP ≈ 20 s**, **CNN de referencia ≈ 75 s**. En un portátil, entre 2 y
+4 veces más. Con GPU disponible, `device: auto` la utiliza.
